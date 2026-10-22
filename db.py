@@ -18,6 +18,8 @@ def conn() -> sqlite3.Connection:
 
 def init() -> None:
     with conn() as c:
+        import clans as _clans
+        _clans.init_tables(c)
         c.executescript("""
         CREATE TABLE IF NOT EXISTS players(
             user_id INTEGER PRIMARY KEY, first_name TEXT, username TEXT,

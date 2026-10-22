@@ -105,7 +105,8 @@ async def cmd_profile(message: Message) -> None:
                f"Username: @{escape(p['username'] or '-')}\nUser ID: <code>{u.id}</code>\n"
                f"EXP: {p['exp']:,} · Level: {lvl} · Leaderboard: #{db.rank_of(u.id)}\n"
                f"Rank: {G.RANKS[db.rank_of_player(u.id)]}\n"
-               f"Equipped character: {escape(p['equipped_char'] or 'none')}")
+               f"Equipped character: {escape(p['equipped_char'] or 'none')}\n"
+               f"Clan: {escape(CL.membership(u.id)['name']) + ' (' + CL.membership(u.id)['role'] + ')' if CL.membership(u.id) else 'none'}")
     photos = await message.bot.get_user_profile_photos(u.id, limit=1)
     if photos.total_count:
         await message.answer_photo(photos.photos[0][-1].file_id, caption=caption, parse_mode="HTML")
@@ -715,6 +716,112 @@ async def cb_crown(callback: CallbackQuery) -> None:
     except Exception:
         pass  # same screen tapped again
     await callback.answer()
+
+
+# ---------------- clans
+import clans as CL  # noqa: E402
+
+CLAN_HELP = (
+    "🏰 <b>Clans</b>\n"
+    "/clan create NAME  make a clan (costs 100 crystals)\n"
+    "/clan join NAME  join a clan\n"
+    "/clan info  your clan and its roles\n"
+    "/clan members  list members\n"
+    "/clan add @user  add a player (leader or officer). Or reply to them.\n"
+    "/clan remove @user  remove a member (leader or officer)\n"
+    "/clan promote @user  member → officer (leader)\n"
+    "/clan demote @user  officer → member (leader)\n"
+    "/clan transfer @user  hand leadership to someone (leader)\n"
+    "/clan leave  leave your clan\n"
+    "/clan disband  close the clan (leader)\n"
+    "/clan list  top clans"
+)
+
+
+def _clan_target(message: Message, args: list[str]):
+    """Target user id from a reply or @username, or None."""
+    if message.reply_to_message and message.reply_to_message.from_user and not message.reply_to_message.from_user.is_bot:
+        u = message.reply_to_message.from_user
+        db.ensure_player(u.id, u.first_name, u.username)
+        return u.id
+    if args and args[0].startswith("@"):
+        row = db.player_by_username(args[0][1:])
+        return row["user_id"] if row else None
+    return None
+
+
+@router.message(Command("clan"))
+async def cmd_clan(message: Message, command: CommandObject) -> None:
+    uid = message.from_user.id
+    db.ensure_player(uid, message.from_user.first_name, message.from_user.username)
+    args = (command.args or "").split()
+    sub = args[0].lower() if args else "help"
+    rest = args[1:]
+    reply = lambda t: message.answer(t, parse_mode="HTML", reply_to_message_id=message.message_id,
+                                     allow_sending_without_reply=True)
+    try:
+        if sub in ("help", ""):
+            await reply(CLAN_HELP)
+        elif sub == "create":
+            name = " ".join(rest)
+            CL.create(uid, name)
+            await reply(f"🏰 Clan <b>{escape(CL.clan_by_name(name)['name'])}</b> created! You are the leader.")
+        elif sub == "join":
+            CL.join(uid, " ".join(rest))
+            await reply(f"🏰 You joined <b>{escape(' '.join(rest))}</b>.")
+        elif sub == "leave":
+            outcome = CL.leave(uid)
+            await reply("You left the clan." if outcome == "left" else "You left and the empty clan closed.")
+        elif sub == "info":
+            m = CL.membership(uid)
+            if m is None:
+                await reply("You are not in a clan. Use /clan create NAME or /clan join NAME.")
+                return
+            mem = CL.members(m["clan_id"])
+            roles = {"leader": 0, "officer": 0, "member": 0}
+            for r in mem:
+                roles[r["role"]] += 1
+            await reply(f"🏰 <b>{escape(m['name'])}</b>\nYour role: {m['role']}\n"
+                        f"Leaders {roles['leader']} · Officers {roles['officer']} · Members {roles['member']} "
+                        f"({len(mem)}/{CL.MAX_MEMBERS})")
+        elif sub == "members":
+            m = CL.membership(uid)
+            if m is None:
+                await reply("You are not in a clan.")
+                return
+            lines = [f"{'👑' if r['role']=='leader' else '⭐' if r['role']=='officer' else '•'} "
+                     f"{escape(r['first_name'] or 'Unknown')} ({r['role']})" for r in CL.members(m["clan_id"])]
+            await reply(f"🏰 <b>{escape(m['name'])}</b> members\n" + "\n".join(lines))
+        elif sub in ("add", "remove", "promote", "demote", "transfer"):
+            target = _clan_target(message, rest)
+            if target is None:
+                await reply(f"Reply to the player's message, or use <code>/clan {sub} @username</code>.")
+                return
+            if db.player(target) is None:
+                await reply("That player hasn't started the game yet (they need /start).")
+                return
+            {"add": CL.add, "remove": CL.remove, "promote": CL.promote,
+             "demote": CL.demote, "transfer": CL.transfer}[sub](uid, target)
+            done = {"add": "added to", "remove": "removed from", "promote": "promoted to officer in",
+                    "demote": "demoted to member in", "transfer": "made the new leader of"}[sub]
+            await reply(f"✅ Player {done} your clan.")
+        elif sub == "disband":
+            if not rest or rest[0].lower() != "confirm":
+                await reply("This closes the clan for everyone. Send <code>/clan disband confirm</code> to do it.")
+                return
+            CL.disband(uid)
+            await reply("🏰 Clan disbanded.")
+        elif sub == "list":
+            rows = CL.top_clans()
+            if not rows:
+                await reply("No clans yet. Be the first: /clan create NAME")
+                return
+            await reply("🏰 <b>Clans</b>\n" + "\n".join(f"{i}. {escape(r['name'])} ({r['n']} members)"
+                                                       for i, r in enumerate(rows, 1)))
+        else:
+            await reply(CLAN_HELP)
+    except CL.ClanError as exc:
+        await reply(f"😕 {escape(str(exc))}")
 
 
 # ---------------- run

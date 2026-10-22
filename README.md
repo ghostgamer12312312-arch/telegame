@@ -132,6 +132,7 @@ pip install -r requirements.txt
 | `/give` | Send money, items, or characters to a friend (see below) |
 | `/daily` | Free reward once a day. Keep the streak going for bigger rewards. |
 | `/weekly` | Bigger bundle once a week, plus a dragon ball. |
+| `/clan` | Clans. Create one for 100 crystals, then `/clan join`, `/clan add`, `/clan promote`, `/clan leave`, and more. Type `/clan` for the full list. |
 | `/help` | A step-by-step guide for new players. |
 | `/rankup` | Rank up using crystals |
 | `/raid_start` | Owner or admin only: start a big group boss fight |
@@ -164,7 +165,7 @@ pip install -r requirements-dev.txt
 python -m pytest -q
 ```
 
-You should see `25 passed`. Run this after every change before you restart the bot.
+You should see `37 passed`. Run this after every change before you restart the bot.
 
 ## Safety
 
