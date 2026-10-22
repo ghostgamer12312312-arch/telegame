@@ -1,6 +1,6 @@
 """Telegram RPG starter: profile, explore, boss, gacha, shop, skills, dragon balls, summons, raid.
 
-Run locally:  BOT_TOKEN=123:abc python bot.py
+Run locally:  BOT_TOKEN=8791864586:AAG_0qEsdc92gqFdwgHoseXoMCMJZOxihdQ:abc python bot.py
 """
 import asyncio
 import json
