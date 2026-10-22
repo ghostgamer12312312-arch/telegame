@@ -38,8 +38,10 @@ def init() -> None:
             hp INTEGER, max_hp INTEGER, damage_json TEXT);
         """)
         cols = [r[1] for r in c.execute("PRAGMA table_info(players)")]
-        if "rank" not in cols:  # migrate databases made before ranks existed
-            c.execute("ALTER TABLE players ADD COLUMN rank INTEGER DEFAULT 1")
+        for col, ddl in [("rank", "INTEGER DEFAULT 1"), ("daily_day", "TEXT"),
+                         ("daily_streak", "INTEGER DEFAULT 0"), ("weekly_week", "TEXT")]:
+            if col not in cols:  # migrate older databases
+                c.execute(f"ALTER TABLE players ADD COLUMN {col} {ddl}")
 
 
 # ---------------- players
@@ -266,3 +268,42 @@ def set_art(kind: str, name: str, file_id: str) -> None:
 def all_art() -> dict:
     with conn() as c:
         return {(r["kind"], r["name"]): r["file_id"] for r in c.execute("SELECT kind, name, file_id FROM art")}
+
+
+# ---------------- daily and weekly rewards
+def claim_daily(uid: int):
+    """Once per UTC day. Streak counts consecutive days. Returns (streak, rewards) or None if already claimed."""
+    from datetime import date, timedelta
+    p = player(uid)
+    today = date.today().isoformat()
+    if p["daily_day"] == today:
+        return None
+    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    streak = (int(p["daily_streak"] or 0) + 1) if p["daily_day"] == yesterday else 1
+    rewards = {"yens": 300 + min(streak, 15) * 100, "gems": min(1 + streak // 5, 5)}
+    if streak % 3 == 0:
+        rewards["tickets"] = 1
+    if streak % 7 == 0:
+        rewards["crystals"] = 1
+    with conn() as c:
+        c.execute("UPDATE players SET daily_day=?, daily_streak=? WHERE user_id=?", (today, streak, uid))
+    give(uid, **rewards)
+    return streak, rewards
+
+
+def claim_weekly(uid: int):
+    """Once per ISO week. Returns (rewards, star_ball) or None if already claimed this week."""
+    import random
+    from datetime import date
+    p = player(uid)
+    year, week, _ = date.today().isocalendar()
+    key = f"{year}-W{week:02d}"
+    if p["weekly_week"] == key:
+        return None
+    with conn() as c:
+        c.execute("UPDATE players SET weekly_week=? WHERE user_id=?", (key, uid))
+    rewards = {"yens": 5000, "gems": 50, "crystals": 5, "tickets": 3, "skill_points": 5}
+    give(uid, **rewards)
+    star = random.randint(1, 3)
+    add_dragon_ball(uid, star)
+    return rewards, star

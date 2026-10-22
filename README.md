@@ -130,6 +130,9 @@ pip install -r requirements.txt
 | `/wish` | Use all seven dragon balls for a wish |
 | `/summon elite` | Fight a strong boss (uses an elite key) |
 | `/give` | Send money, items, or characters to a friend (see below) |
+| `/daily` | Free reward once a day. Keep the streak going for bigger rewards. |
+| `/weekly` | Bigger bundle once a week, plus a dragon ball. |
+| `/help` | A step-by-step guide for new players. |
 | `/rankup` | Rank up using crystals |
 | `/raid_start` | Owner or admin only: start a big group boss fight |
 | `/raid_attack` | Hit the big boss |

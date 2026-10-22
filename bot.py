@@ -74,7 +74,7 @@ def auto_battle(p_hp: int, p_atk: int, e_hp: int, e_dmg: int) -> tuple[bool, int
 
 
 # ---------------- basics
-@router.message(Command("start", "help"))
+@router.message(Command("start"))
 async def cmd_start(message: Message) -> None:
     u = message.from_user
     db.ensure_player(u.id, u.first_name, u.username)
@@ -172,6 +172,70 @@ async def cmd_explore(message: Message) -> None:
     tail = f"\n⚠ A boss is coming in {left_to_boss} more win(s)!" if left_to_boss > 0 else \
         "\n⚠ A boss has appeared. Use /explore to face it!"
     await message.answer(f"⚔ You defeated <b>{name}</b>!\n" + ", ".join(notes) + tail, parse_mode="HTML")
+
+
+HELP_TEXT = (
+    "📖 <b>How to play</b>\n\n"
+    "<b>Step 1. Get started</b>\n"
+    "Send /start, then /daily to collect your first reward.\n\n"
+    "<b>Step 2. Get stronger</b>\n"
+    "/explore fights an enemy. Win to get yens, items and EXP.\n"
+    "Every 15 wins, a boss appears. Beat it for big rewards.\n\n"
+    "<b>Step 3. Get characters</b>\n"
+    "/gacha uses one ticket for a random character. Get tickets from /daily, /weekly, bosses, or /shop.\n"
+    "/equip Goku puts a character on your team. /myteam shows your strength.\n\n"
+    "<b>Step 4. Gear up</b>\n"
+    "/shop shows things to buy. /buy 1 buys item 1.\n"
+    "/equip Iron Sword wears a weapon. Armor works the same way.\n\n"
+    "<b>Step 5. Rank up</b>\n"
+    "/rankup uses crystals. Crystals are rare, so save them.\n\n"
+    "<b>Rewards</b>\n"
+    "/daily: once a day. Keep it going for bigger rewards.\n"
+    "/weekly: once a week. A bigger bundle plus a dragon ball.\n\n"
+    "<b>Dragon balls</b>\n"
+    "Collect one of each 1★ to 7★. Then /wish.\n\n"
+    "<b>Friends</b>\n"
+    "/give 50 gems (reply to a friend) sends items or money.\n\n"
+    "<b>All commands</b>\n"
+    "/profile, /explore, /daily, /weekly, /myinventory, /shop, /buy, /gacha, /mycharacters, "
+    "/myteam, /equip, /skills, /learn, /wish, /summon, /give, /rankup, /raid, /raid_attack\n\n"
+    "<i>Stuck? Ask in the group. Tip: /explore has no cost, so play often.</i>"
+)
+
+
+@router.message(Command("help"))
+async def cmd_help(message: Message) -> None:
+    u = message.from_user
+    db.ensure_player(u.id, u.first_name, u.username)
+    await message.answer(HELP_TEXT, parse_mode="HTML", reply_to_message_id=message.message_id,
+                         allow_sending_without_reply=True)
+
+
+@router.message(Command("daily"))
+async def cmd_daily(message: Message) -> None:
+    uid = message.from_user.id
+    db.ensure_player(uid, message.from_user.first_name, message.from_user.username)
+    res = db.claim_daily(uid)
+    if res is None:
+        await message.answer("✅ You already took today's reward. Come back tomorrow.")
+        return
+    streak, rw = res
+    parts = [f"{v:,} {k}" for k, v in rw.items()]
+    await message.answer(f"🎁 <b>Daily reward</b> (day {streak} in a row)\n+ " + ", ".join(parts) +
+                         "\nKeep the streak going for bigger rewards.", parse_mode="HTML")
+
+
+@router.message(Command("weekly"))
+async def cmd_weekly(message: Message) -> None:
+    uid = message.from_user.id
+    db.ensure_player(uid, message.from_user.first_name, message.from_user.username)
+    res = db.claim_weekly(uid)
+    if res is None:
+        await message.answer("✅ You already took this week's bundle. It resets every Monday.")
+        return
+    rw, star = res
+    parts = [f"{v:,} {k}" for k, v in rw.items()] + [f"1 × {star}★ Dragon Ball"]
+    await message.answer("🎁 <b>Weekly bundle</b>\n+ " + ", ".join(parts), parse_mode="HTML")
 
 
 # ---------------- inventory and shop
