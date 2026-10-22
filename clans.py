@@ -9,7 +9,6 @@ import db
 import game_data as G
 
 CREATE_COST = G.CLAN_CREATE_CRYSTALS
-MAX_MEMBERS = G.CLAN_MAX_MEMBERS
 ROLE_RANK = {"leader": 3, "officer": 2, "member": 1}
 
 
@@ -91,8 +90,6 @@ def join(user_id: int, name: str) -> int:
     clan = clan_by_name(name)
     if clan is None:
         raise ClanError("No clan with that name.")
-    if len(members(clan["id"])) >= MAX_MEMBERS:
-        raise ClanError("That clan is full.")
     with db.conn() as c:
         c.execute("INSERT INTO clan_members(user_id, clan_id, role) VALUES(?,?,'member')", (user_id, clan["id"]))
     return clan["id"]
@@ -105,8 +102,6 @@ def add(actor: int, target: int) -> None:
     _require(actor, m["clan_id"], ("leader", "officer"))
     if membership(target):
         raise ClanError("That player is already in a clan.")
-    if len(members(m["clan_id"])) >= MAX_MEMBERS:
-        raise ClanError("Your clan is full.")
     with db.conn() as c:
         c.execute("INSERT INTO clan_members(user_id, clan_id, role) VALUES(?,?,'member')", (target, m["clan_id"]))
 

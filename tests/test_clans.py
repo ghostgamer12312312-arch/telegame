@@ -45,13 +45,13 @@ def test_one_clan_per_player():
         CL.join(2, "Alpha")
 
 
-def test_join_and_full_clan(monkeypatch):
-    player(1); player(2); player(3)
+def test_clans_have_no_member_limit():
+    for u in range(1, 41):
+        player(u)
     CL.create(1, "Alpha")
-    monkeypatch.setattr(CL, "MAX_MEMBERS", 2)
-    CL.join(2, "alpha")
-    with pytest.raises(CL.ClanError):
-        CL.join(3, "Alpha")                    # full
+    for u in range(2, 41):
+        CL.join(u, "Alpha")
+    assert len(CL.members(CL.membership(1)["clan_id"])) == 40
 
 
 def test_leader_adds_and_officer_adds():

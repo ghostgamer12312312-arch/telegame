@@ -783,7 +783,7 @@ async def cmd_clan(message: Message, command: CommandObject) -> None:
                 roles[r["role"]] += 1
             await reply(f"🏰 <b>{escape(m['name'])}</b>\nYour role: {m['role']}\n"
                         f"Leaders {roles['leader']} · Officers {roles['officer']} · Members {roles['member']} "
-                        f"({len(mem)}/{CL.MAX_MEMBERS})")
+                        f"(no member limit)")
         elif sub == "members":
             m = CL.membership(uid)
             if m is None:
