@@ -25,7 +25,7 @@ def init() -> None:
             crystals INTEGER DEFAULT 0, tickets INTEGER DEFAULT 0, skill_points INTEGER DEFAULT 0,
             keys_elite INTEGER DEFAULT 0, keys_boss INTEGER DEFAULT 0,
             npc_streak INTEGER DEFAULT 0, equipped_char TEXT, weapon TEXT, armor TEXT,
-            last_raid_hit INTEGER DEFAULT 0);
+            last_raid_hit INTEGER DEFAULT 0, rank INTEGER DEFAULT 1);
         CREATE TABLE IF NOT EXISTS items(user_id INTEGER, item TEXT, qty INTEGER DEFAULT 0,
             PRIMARY KEY(user_id, item));
         CREATE TABLE IF NOT EXISTS characters(user_id INTEGER, name TEXT, rarity TEXT,
@@ -36,6 +36,9 @@ def init() -> None:
         CREATE TABLE IF NOT EXISTS raid(id INTEGER PRIMARY KEY CHECK(id = 1), active INTEGER,
             hp INTEGER, max_hp INTEGER, damage_json TEXT);
         """)
+        cols = [r[1] for r in c.execute("PRAGMA table_info(players)")]
+        if "rank" not in cols:  # migrate databases made before ranks existed
+            c.execute("ALTER TABLE players ADD COLUMN rank INTEGER DEFAULT 1")
 
 
 # ---------------- players
@@ -76,7 +79,7 @@ def give(uid: int, **amounts) -> None:
 
 
 def spend(uid: int, column: str, amount: int) -> bool:
-    allowed = {"yens", "gems", "tickets", "skill_points", "keys_elite", "keys_boss"}
+    allowed = {"yens", "gems", "crystals", "tickets", "skill_points", "keys_elite", "keys_boss"}
     if column not in allowed:
         raise ValueError("bad currency")
     with conn() as c:
@@ -86,7 +89,7 @@ def spend(uid: int, column: str, amount: int) -> bool:
 
 
 def set_field(uid: int, field: str, value) -> None:
-    if field not in {"equipped_char", "weapon", "armor", "npc_streak", "last_raid_hit"}:
+    if field not in {"equipped_char", "weapon", "armor", "npc_streak", "last_raid_hit", "rank"}:
         raise ValueError("bad field")
     with conn() as c:
         c.execute(f"UPDATE players SET {field}=? WHERE user_id=?", (value, uid))
@@ -202,3 +205,52 @@ def roll_rarity() -> str:
         if r <= acc:
             return name
     return "common"
+
+
+# ---------------- give / rank helpers
+def player_by_username(username: str):
+    with conn() as c:
+        return c.execute("SELECT * FROM players WHERE lower(username)=lower(?)", (username,)).fetchone()
+
+
+def remove_item(uid: int, item: str, qty: int) -> bool:
+    with conn() as c:
+        cur = c.execute("UPDATE items SET qty = qty - ? WHERE user_id=? AND item=? AND qty >= ?",
+                        (qty, uid, item, qty))
+        return cur.rowcount == 1
+
+
+def remove_dragon_ball(uid: int, star: int, qty: int) -> bool:
+    with conn() as c:
+        cur = c.execute("UPDATE dragon_balls SET qty = qty - ? WHERE user_id=? AND star=? AND qty >= ?",
+                        (qty, uid, star, qty))
+        return cur.rowcount == 1
+
+
+def transfer_character(giver: int, target: int, name: str) -> bool:
+    """Move a character. Returns False if the giver doesn't own it or the target already does."""
+    with conn() as c:
+        row = c.execute("SELECT rarity FROM characters WHERE user_id=? AND name=?", (giver, name)).fetchone()
+        if row is None or c.execute("SELECT 1 FROM characters WHERE user_id=? AND name=?",
+                                    (target, name)).fetchone():
+            return False
+        c.execute("DELETE FROM characters WHERE user_id=? AND name=?", (giver, name))
+        c.execute("INSERT INTO characters(user_id,name,rarity) VALUES(?,?,?)", (target, name, row["rarity"]))
+        c.execute("UPDATE players SET equipped_char=NULL WHERE user_id=? AND equipped_char=?", (giver, name))
+        return True
+
+
+def transfer_skill(giver: int, target: int, name: str) -> bool:
+    with conn() as c:
+        if c.execute("SELECT 1 FROM skills WHERE user_id=? AND name=?", (giver, name)).fetchone() is None:
+            return False
+        if c.execute("SELECT 1 FROM skills WHERE user_id=? AND name=?", (target, name)).fetchone():
+            return False
+        c.execute("DELETE FROM skills WHERE user_id=? AND name=?", (giver, name))
+        c.execute("INSERT INTO skills(user_id,name) VALUES(?,?)", (target, name))
+        return True
+
+
+def rank_of_player(uid: int) -> int:
+    p = player(uid)
+    return int(p["rank"] or 1) if p else 1

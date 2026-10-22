@@ -58,3 +58,7 @@ SUMMONS = {
 }
 
 RAID = {"hp": 60000, "dmg": 300, "reward_mult": 50, "attack_cooldown_s": 600}
+
+# Ranks: (number, name). Rankup costs in crystals. Rank 5 -> 6 needs every gacha character.
+RANKS = {1: "Beginner", 2: "Novice", 3: "King", 4: "Emperor", 5: "Demigod", 6: "Immortal"}
+RANKUP_CRYSTALS = {1: 500, 2: 4000, 3: 20000, 4: 70000}

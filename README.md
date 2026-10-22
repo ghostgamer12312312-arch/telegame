@@ -18,6 +18,8 @@ Everything runs from one Python file and one SQLite file, so you can host it on 
 | `/skills`, `/learn <skill>` | Skill shop, paid in skill points |
 | `/wish` | Uses one of each 1★ to 7★ ball for a wish |
 | `/summon elite` or `/summon mythical` | Spend a key to fight a strong key boss |
+| `/give` | Send gems, yens, crystals, tickets, keys, gear, dragon balls, characters or skills. Reply to a player, or use `/give @user thing [amount]`. |
+| `/rankup` | Rank up with crystals: Beginner → Novice (500), → King (4,000), → Emperor (20,000), → Demigod (70,000), → Immortal (needs every gacha character). |
 | `/raid`, `/raid_start`, `/raid_attack` | Global raid. Only the owner or admins start it. Winners get 50x rewards. |
 
 The numbers (prices, drop rates, NPC stats, boss stats, raid HP) are in `game_data.py`.

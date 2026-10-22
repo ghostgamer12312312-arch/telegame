@@ -85,7 +85,8 @@ async def cmd_start(message: Message) -> None:
         "/buy &lt;id&gt; [qty]  buy from /shop\n/gacha  spend a ticket on a DBS character\n"
         "/mycharacters  your characters\n/myteam  your active team\n/equip &lt;name&gt;  equip gear or a character\n"
         "/skills  skill shop\n/learn &lt;skill&gt;  learn a skill\n/wish  use all 1 to 7 star dragon balls\n"
-        "/summon elite or /summon mythical  fight a key boss\n/raid  global raid (status)\n"
+        "/summon elite or /summon mythical  fight a key boss\n/give  send gems, yens, crystals, items or characters\n"
+        "/rankup  rank up with crystals\n/raid  global raid (status)\n"
         "/raid_start  start raid (owner/admin only)\n/raid_attack  hit the raid boss")
 
 
@@ -97,7 +98,8 @@ async def cmd_profile(message: Message) -> None:
     lvl = db.level_of(p["exp"])
     caption = (f"👤 <b>{escape(p['first_name'] or 'Unknown')}</b>\n"
                f"Username: @{escape(p['username'] or '-')}\nUser ID: <code>{u.id}</code>\n"
-               f"EXP: {p['exp']:,} · Level: {lvl} · Rank: #{db.rank_of(u.id)}\n"
+               f"EXP: {p['exp']:,} · Level: {lvl} · Leaderboard: #{db.rank_of(u.id)}\n"
+               f"Rank: {G.RANKS[db.rank_of_player(u.id)]}\n"
                f"Equipped character: {escape(p['equipped_char'] or 'none')}")
     photos = await message.bot.get_user_profile_photos(u.id, limit=1)
     if photos.total_count:
@@ -420,6 +422,150 @@ async def cmd_raid_attack(message: Message) -> None:
                 tickets=3 * mult, skill_points=6 * mult, exp=200 * mult)
     await message.answer(f"🏆 The raid boss is defeated! {len(dmg_by)} hitters each earned "
                          f"{mult}x boss rewards.")
+
+
+
+# ---------------- give
+CURRENCY_NAMES = {
+    "yen": "yens", "yens": "yens", "gem": "gems", "gems": "gems",
+    "crystal": "crystals", "crystals": "crystals", "ticket": "tickets", "tickets": "tickets",
+    "skill point": "skill_points", "skill points": "skill_points",
+    "elite key": "keys_elite", "elite keys": "keys_elite", "boss key": "keys_boss", "boss keys": "keys_boss",
+}
+
+
+def _find_name(thing: str, names) -> str | None:
+    low = thing.lower()
+    return next((n for n in names if n.lower() == low), None)
+
+
+@router.message(Command("give"))
+async def cmd_give(message: Message, command: CommandObject) -> None:
+    giver = message.from_user.id
+    db.ensure_player(giver, message.from_user.first_name, message.from_user.username)
+    args = (command.args or "").split()
+    usage = ("Use <code>/give &lt;amount&gt; &lt;thing&gt;</code> by replying to someone, or "
+             "<code>/give @username &lt;thing&gt; [amount]</code>.\n"
+             "Things: yens, gems, crystals, tickets, skill points, elite keys, boss keys, "
+             "dragon ball 3, any weapon/armor, any skill, or a character name.")
+    reply = message.reply_to_message
+    if reply and reply.from_user and not reply.from_user.is_bot:
+        target_id = reply.from_user.id
+        db.ensure_player(target_id, reply.from_user.first_name, reply.from_user.username)
+    else:
+        if not args:
+            await message.answer(usage, parse_mode="HTML")
+            return
+        tok = args.pop(0)
+        if tok.startswith("@"):
+            row = db.player_by_username(tok[1:])
+            if row is None:
+                await message.answer("I haven't seen that player yet. They need to send /start.")
+                return
+            target_id = row["user_id"]
+        elif tok.isdigit():
+            if db.player(int(tok)) is None:
+                await message.answer("That player hasn't started yet (they need /start).")
+                return
+            target_id = int(tok)
+        else:
+            await message.answer(usage, parse_mode="HTML")
+            return
+    if target_id == giver:
+        await message.answer("You can't give to yourself.")
+        return
+    qty = 1
+    if args and args[-1].isdigit():
+        qty = int(args.pop())
+    qty = max(1, min(qty, 100000))
+    thing = " ".join(args).strip()
+    if not thing:
+        await message.answer(usage, parse_mode="HTML")
+        return
+
+    # currency
+    cur = CURRENCY_NAMES.get(thing.lower())
+    if cur:
+        if not db.spend(giver, cur, qty):
+            await message.answer(f"You don't have {qty:,} {thing}.")
+            return
+        db.give(target_id, **{cur: qty})
+        await message.answer(f"🎁 Sent {qty:,} {thing} to {target_id}.")
+        return
+    # dragon ball
+    if thing.lower().startswith("dragon ball"):
+        digits = [c for c in thing if c.isdigit()]
+        if not digits or int(digits[0]) not in G.DRAGON_BALL_STARS:
+            await message.answer("Use e.g. <code>/give @user dragon ball 3</code>.", parse_mode="HTML")
+            return
+        star = int(digits[0])
+        if not db.remove_dragon_ball(giver, star, qty):
+            await message.answer(f"You don't have {qty} of the {star}★ ball.")
+            return
+        db.add_dragon_ball(target_id, star, qty)
+        await message.answer(f"🎁 Sent {qty} × {star}★ Dragon Ball.")
+        return
+    # equipment items (weapons and armor)
+    item = _find_name(thing, G.EQUIPMENT)
+    if item:
+        owned = {r["item"]: r["qty"] for r in db.items(giver)}
+        gp = db.player(giver)
+        if gp["weapon"] == item or gp["armor"] == item:
+            if owned.get(item, 0) - qty < 1:
+                await message.answer("Unequip that item first (equip something else in its slot).")
+                return
+        if not db.remove_item(giver, item, qty):
+            await message.answer(f"You don't have {qty} × {item}.")
+            return
+        db.add_item(target_id, item, qty)
+        await message.answer(f"🎁 Sent {qty} × {item}.")
+        return
+    # characters and skills move (qty must be 1)
+    char = _find_name(thing, [n for n, _ in G.CHARACTERS])
+    if char:
+        if db.transfer_character(giver, target_id, char):
+            await message.answer(f"🎁 Sent <b>{char}</b> to the other player.", parse_mode="HTML")
+        else:
+            await message.answer("They already have that character, or you don't own it.")
+        return
+    skill = _find_name(thing, list(G.SKILLS))
+    if skill:
+        if db.transfer_skill(giver, target_id, skill):
+            await message.answer(f"🎁 Sent the {skill} skill.")
+        else:
+            await message.answer("They already know that skill, or you don't know it.")
+        return
+    await message.answer(f"I don't know <i>{escape(thing)}</i>. " + "See /help for things you can give.",
+                         parse_mode="HTML")
+
+
+# ---------------- rankup
+@router.message(Command("rankup"))
+async def cmd_rankup(message: Message) -> None:
+    uid = message.from_user.id
+    db.ensure_player(uid, message.from_user.first_name, message.from_user.username)
+    rank = db.rank_of_player(uid)
+    if rank >= 6:
+        await message.answer("👑 You are already <b>Immortal</b>, the highest rank.", parse_mode="HTML")
+        return
+    if rank < 5:
+        cost = G.RANKUP_CRYSTALS[rank]
+        if not db.spend(uid, "crystals", cost):
+            p = db.player(uid)
+            await message.answer(f"Rank {G.RANKS[rank]} → {G.RANKS[rank + 1]} needs {cost:,} crystals. "
+                                 f"You have {p['crystals']:,}.")
+            return
+        db.set_field(uid, "rank", rank + 1)
+        await message.answer(f"⬆ Ranked up to <b>{G.RANKS[rank + 1]}</b>! (−{cost:,} crystals)", parse_mode="HTML")
+        return
+    total = len(G.CHARACTERS)
+    have = len(db.characters(uid))
+    if have < total:
+        await message.answer(f"To become <b>Immortal</b> you need every gacha character: {have}/{total} owned.",
+                             parse_mode="HTML")
+        return
+    db.set_field(uid, "rank", 6)
+    await message.answer("👑 You own every character. You are now <b>Immortal</b>!", parse_mode="HTML")
 
 
 # ---------------- run
