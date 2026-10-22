@@ -157,6 +157,15 @@ pip install -r requirements.txt
 
 ---
 
+## Check that the game works (for developers)
+
+```
+pip install -r requirements-dev.txt
+python -m pytest -q
+```
+
+You should see `25 passed`. Run this after every change before you restart the bot.
+
 ## Safety
 
 - **Never share your BOT_TOKEN.** Anyone with it can control your bot.

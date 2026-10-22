@@ -273,12 +273,13 @@ def all_art() -> dict:
 # ---------------- daily and weekly rewards
 def claim_daily(uid: int):
     """Once per UTC day. Streak counts consecutive days. Returns (streak, rewards) or None if already claimed."""
-    from datetime import date, timedelta
+    from datetime import datetime, timedelta, timezone
     p = player(uid)
-    today = date.today().isoformat()
+    now = datetime.now(timezone.utc).date()
+    today = now.isoformat()
     if p["daily_day"] == today:
         return None
-    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    yesterday = (now - timedelta(days=1)).isoformat()
     streak = (int(p["daily_streak"] or 0) + 1) if p["daily_day"] == yesterday else 1
     rewards = {"yens": 300 + min(streak, 15) * 100, "gems": min(1 + streak // 5, 5)}
     if streak % 3 == 0:
@@ -294,9 +295,9 @@ def claim_daily(uid: int):
 def claim_weekly(uid: int):
     """Once per ISO week. Returns (rewards, star_ball) or None if already claimed this week."""
     import random
-    from datetime import date
+    from datetime import datetime, timezone
     p = player(uid)
-    year, week, _ = date.today().isocalendar()
+    year, week, _ = datetime.now(timezone.utc).date().isocalendar()
     key = f"{year}-W{week:02d}"
     if p["weekly_week"] == key:
         return None

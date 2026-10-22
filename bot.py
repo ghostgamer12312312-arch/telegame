@@ -56,16 +56,21 @@ def player_stats(uid: int) -> tuple[int, int]:
     return atk, hp
 
 
-def auto_battle(p_hp: int, p_atk: int, e_hp: int, e_dmg: int) -> tuple[bool, int, list[str]]:
-    """Simple turn fight. Returns (won, player_hp_left, log lines)."""
+def auto_battle(p_hp: int, p_atk: int, e_hp: int, e_dmg: int, enrage: bool = False) -> tuple[bool, int, list[str]]:
+    """Simple turn fight. Returns (won, player_hp_left, log lines).
+
+    enrage: bosses hit 30% harder once they are at half HP or lower.
+    """
     log = []
+    e_max = e_hp
     for rnd in range(1, 41):
         hit = max(1, int(p_atk * random.uniform(0.8, 1.2)))
         e_hp -= hit
         if e_hp <= 0:
             log.append(f"Round {rnd}: you hit for {hit}. Victory!")
             return True, max(1, p_hp), log
-        taken = max(1, int(e_dmg * random.uniform(0.8, 1.2)))
+        mult = 1.3 if enrage and e_hp <= e_max // 2 else 1.0
+        taken = max(1, int(e_dmg * mult * random.uniform(0.8, 1.2)))
         p_hp -= taken
         log.append(f"Round {rnd}: you hit {hit}, take {taken}.")
         if p_hp <= 0:
@@ -117,9 +122,10 @@ async def cmd_explore(message: Message) -> None:
     atk, hp = player_stats(uid)
     if p["npc_streak"] >= G.NPC_STREAK_FOR_BOSS:
         b = G.BOSS
-        won, left, log = auto_battle(hp, atk, b["hp"], b["dmg"])
+        won, left, log = auto_battle(hp, atk, b["hp"], b["dmg"], enrage=True)
         if not won:
-            db.set_field(uid, "npc_streak", 0)
+            # the boss stays due: the streak is kept, so the next /explore tries again
+            db.set_field(uid, "npc_streak", p["npc_streak"])
             await message.answer(f"💀 <b>{b['name']}</b> beat you. Heal and try again.\n" + "\n".join(log[-3:]),
                                  parse_mode="HTML")
             return
