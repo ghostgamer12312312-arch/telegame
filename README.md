@@ -1,99 +1,172 @@
-# Telegram RPG Starter
+# Telegram RPG Bot
 
-An open-source Telegram bot RPG: profiles, NPC fights, bosses, gacha with Dragon Ball
-Super characters, a shop, skills, Dragon Ball wishes, key-based summons, and a global raid.
-Everything runs from one Python file and one SQLite file, so you can host it on a phone.
+A Telegram game bot. Players fight, collect things, rank up, and more.
+This guide is written for complete beginners. Follow the steps in order.
 
-## Features
+---
 
-| Command | What it does |
-|---|---|
-| `/start`, `/help` | Welcome and command list |
-| `/profile` | Photo, name, username, user ID, EXP, level, rank, equipped character |
-| `/explore` | Fight one of 6 NPCs. Drops yens, gems, crystals, skill points, tickets, dragon balls, gear. Every 15 NPC wins, a boss appears. |
-| `/myinventory` | Currency, keys, gear, dragon balls, skills |
-| `/shop`, `/buy <id> [qty]` | Weapons, armor, gacha tickets, crystals, keys |
-| `/gacha` | Spend a ticket for a random Dragon Ball Super character |
-| `/mycharacters`, `/myteam`, `/equip <name>` | Characters and gear |
-| `/skills`, `/learn <skill>` | Skill shop, paid in skill points |
-| `/wish` | Uses one of each 1★ to 7★ ball for a wish |
-| `/summon elite` or `/summon mythical` | Spend a key to fight a strong key boss |
-| `/give` | Send gems, yens, crystals, tickets, keys, gear, dragon balls, characters or skills. Reply to a player, or use `/give @user thing [amount]`. |
-| `/rankup` | Rank up with crystals: Beginner → Novice (500), → King (4,000), → Emperor (20,000), → Demigod (70,000), → Immortal (needs every gacha character). |
-| `/raid`, `/raid_start`, `/raid_attack` | Global raid. Only the owner or admins start it. Winners get 50x rewards. |
+## Part 1: Make your bot (5 minutes, on your phone)
 
-The numbers (prices, drop rates, NPC stats, boss stats, raid HP) are in `game_data.py`.
-Change them there. No code edits needed.
+1. Open Telegram. Search for **@BotFather** and open it.
+2. Send: `/newbot`
+3. It asks for a name. Type anything, for example: `My Game Bot`
+4. It asks for a username. It must end in `bot`, for example: `mygame_rpg_bot`
+5. BotFather replies with a long code like `123456:ABCdef...`.
+   **Copy it and keep it safe.** This is your **BOT_TOKEN**.
 
-## What you need
+Next, find your own Telegram number:
 
-- A Telegram account
-- A bot token from **@BotFather** (send `/newbot`, copy the token)
-- Your numeric Telegram user ID (ask **@userinfobot**). This becomes `OWNER_ID`.
-- Python 3.10+
+6. Search for **@userinfobot** and open it.
+7. Send any message. It replies with a number like `123456789`.
+   **Copy it.** This is your **OWNER_ID**.
 
-## Run it on your Android phone (Termux)
+---
 
-1. Install **Termux** from F-Droid (the Play Store version is outdated).
-2. In Termux:
-   ```bash
-   pkg update && pkg upgrade -y
-   pkg install -y python git
-   git clone https://github.com/YOUR-NAME/telegame.git
-   cd telegame
-   pip install -r requirements.txt
-   cp .env.example .env
-   nano .env          # paste BOT_TOKEN and OWNER_ID, then Ctrl+O, Enter, Ctrl+X
-   ```
-3. Start the bot. Load the variables first:
-   ```bash
-   export $(grep -v '^#' .env | xargs)
-   python bot.py
-   ```
-4. Keep it running when the screen is off:
-   ```bash
-   termux-wake-lock     # needs the Termux:API app; optional
-   ```
-   Also turn off battery optimisation for Termux in Android settings.
+## Part 2A: Run it on your Android phone (Termux)
 
-The bot only runs while Termux is open or running in the background. Phone hosting is fine
-for testing and small groups. For 24/7 use a PC, a Raspberry Pi, or a small VPS (see below).
+**Step 1.** Install **Termux** from **F-Droid** (https://f-droid.org). Do not use the Play Store version.
 
-## Run it on a PC or Linux server
+**Step 2.** Open Termux. Copy and paste these lines, one at a time, pressing Enter after each one:
 
-```bash
-git clone https://github.com/YOUR-NAME/telegame.git
-cd telegame
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env   # edit BOT_TOKEN and OWNER_ID
-export $(grep -v '^#' .env | xargs)
-python bot.py
+```
+pkg update -y
+pkg upgrade -y
+pkg install -y python git
 ```
 
-To keep it alive on a Linux server, run it under systemd or `tmux`.
+If it asks a question, type `y` and press Enter.
 
-## Make your group play with it
+**Step 3.** Download this game:
 
-Add the bot to a Telegram group. Disable its privacy mode in @BotFather
-(`/setprivacy` → Disable) if you want it to read every message. Commands work either way.
+```
+git clone https://github.com/mrandi-art/telegame.git
+cd telegame
+```
 
-## Files
+**Step 4.** Install the game's parts:
 
-- `bot.py`: all commands and the battle loop
-- `db.py`: SQLite storage (creates `game.sqlite` on first run)
-- `game_data.py`: all tunable numbers (NPCs, shop, rarities, boss, raid)
-- `.env.example`: settings template. Your real `.env` is ignored by git.
+```
+pip install -r requirements.txt
+```
+
+If this step shows an error, run `pkg install -y rust clang` and then run the line above again.
+
+**Step 5.** Make your settings file:
+
+```
+cp .env.example .env
+nano .env
+```
+
+A text editor opens. Change two lines:
+- `BOT_TOKEN=` → paste your token from Part 1 (after the `=` sign, no spaces)
+- `OWNER_ID=` → paste your number from Part 1
+
+To save: press **Ctrl + O**, then **Enter**, then **Ctrl + X**.
+
+**Step 6.** Start the bot:
+
+```
+sh start.sh
+```
+
+If you see lines of text and no red error, it's running. Leave Termux open.
+
+To stop it: press **Ctrl + C**.
+
+To start it again later: open Termux, type `cd telegame` then `sh start.sh`.
+
+---
+
+## Part 2B: Run it on a computer (Windows, Mac, or Linux)
+
+1. Install **Python 3.10 or newer** from https://www.python.org/downloads/
+   (on Windows, tick "Add Python to PATH" during install).
+2. Install **Git** from https://git-scm.com
+3. Open a terminal (Command Prompt, Terminal, or PowerShell) and run:
+
+```
+git clone https://github.com/mrandi-art/telegame.git
+cd telegame
+pip install -r requirements.txt
+```
+
+4. Make the settings file. Copy `.env.example` to a new file called `.env`,
+   open it in Notepad, and paste your **BOT_TOKEN** and **OWNER_ID**. Save it.
+5. Start the bot:
+   - Mac or Linux: `sh start.sh`
+   - Windows: `python bot.py` (after setting the two values in `.env`, or type them in first)
+
+---
+
+## Part 3: Try it in Telegram
+
+1. Open your bot in Telegram (search for its username from Part 1).
+2. Press **Start**, or send `/start`.
+3. Send `/explore` to fight an enemy and collect rewards.
+4. Send `/profile` to see your stats.
+
+**Want a group?** Add your bot to a group chat. Everyone in the group can play.
+
+---
+
+## The commands, in plain words
+
+| Type this | What happens |
+|---|---|
+| `/start` | Begin your game |
+| `/profile` | See your name, level, rank, and equipped character |
+| `/explore` | Fight an enemy. You get money and items. |
+| `/myinventory` | See everything you own |
+| `/shop` | See things to buy |
+| `/buy 1` | Buy item number 1 from the shop (use any number from /shop) |
+| `/gacha` | Use a ticket to get a random character |
+| `/mycharacters` | See your characters |
+| `/equip Goku` | Put a character on your team (or any character name) |
+| `/equip Iron Sword` | Wear a weapon or armor |
+| `/myteam` | See your team and how strong it is |
+| `/skills` | See skills you can learn |
+| `/learn Ki Blast` | Learn a skill |
+| `/wish` | Use all seven dragon balls for a wish |
+| `/summon elite` | Fight a strong boss (uses an elite key) |
+| `/give` | Send money, items, or characters to a friend (see below) |
+| `/rankup` | Rank up using crystals |
+| `/raid_start` | Owner or admin only: start a big group boss fight |
+| `/raid_attack` | Hit the big boss |
+
+**How to give something to a friend:**
+- Reply to their message, then type: `/give 50 gems`
+- Or type their username: `/give @friend 50 gems`
+- Things you can give: gems, yens, crystals, tickets, weapons, armor, characters, skills, dragon balls.
+
+**How to rank up:** type `/rankup`. It tells you what you still need.
+
+---
+
+## Problems?
+
+| Problem | Fix |
+|---|---|
+| "Set BOT_TOKEN first" | Your `.env` file is missing the token. Do Step 5 again. |
+| Bot doesn't answer | Check the token has no spaces. Make sure the program is still running. |
+| `pip install` fails on phone | Run `pkg install -y rust clang`, then `pip install -r requirements.txt` |
+| You want to start over | Delete the file `game.sqlite` (this erases all player progress) |
+
+---
 
 ## Safety
 
-- Keep `BOT_TOKEN` secret. If it leaks, revoke it in @BotFather.
-- Only `OWNER_ID` and `ADMIN_IDS` can start raids.
-- Back up `game.sqlite` to keep player progress.
+- **Never share your BOT_TOKEN.** Anyone with it can control your bot.
+  If it leaks, open @BotFather, send `/revoke`, and pick your bot to make a new one.
+- Keep a copy of `game.sqlite`. It holds all player progress.
 
-## Contributing
+## Files
 
-Pull requests welcome. Keep changes small and tune numbers in `game_data.py`.
+- `bot.py`: the game
+- `game_data.py`: prices, enemies, and rates. Change numbers here.
+- `db.py`: saves progress to `game.sqlite`
+- `start.sh`: starts the bot
+- `.env.example`: settings template
 
 ## License
 
