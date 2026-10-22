@@ -33,6 +33,7 @@ def init() -> None:
         CREATE TABLE IF NOT EXISTS skills(user_id INTEGER, name TEXT, PRIMARY KEY(user_id, name));
         CREATE TABLE IF NOT EXISTS dragon_balls(user_id INTEGER, star INTEGER, qty INTEGER DEFAULT 0,
             PRIMARY KEY(user_id, star));
+        CREATE TABLE IF NOT EXISTS art(kind TEXT, name TEXT, file_id TEXT, PRIMARY KEY(kind, name));
         CREATE TABLE IF NOT EXISTS raid(id INTEGER PRIMARY KEY CHECK(id = 1), active INTEGER,
             hp INTEGER, max_hp INTEGER, damage_json TEXT);
         """)
@@ -254,3 +255,14 @@ def transfer_skill(giver: int, target: int, name: str) -> bool:
 def rank_of_player(uid: int) -> int:
     p = player(uid)
     return int(p["rank"] or 1) if p else 1
+
+
+# ---------------- artwork (admin uploads, shown in /crown)
+def set_art(kind: str, name: str, file_id: str) -> None:
+    with conn() as c:
+        c.execute("INSERT OR REPLACE INTO art(kind, name, file_id) VALUES(?,?,?)", (kind, name, file_id))
+
+
+def all_art() -> dict:
+    with conn() as c:
+        return {(r["kind"], r["name"]): r["file_id"] for r in c.execute("SELECT kind, name, file_id FROM art")}

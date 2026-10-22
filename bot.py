@@ -12,7 +12,7 @@ from html import escape
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.client.default import DefaultBotProperties
 from aiogram.filters import Command, CommandObject
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 import db
 import game_data as G
@@ -566,6 +566,85 @@ async def cmd_rankup(message: Message) -> None:
         return
     db.set_field(uid, "rank", 6)
     await message.answer("👑 You own every character. You are now <b>Immortal</b>!", parse_mode="HTML")
+
+
+# ---------------- artwork: /upload and /crown (admins only, same idea as the Veil bot)
+def _art_targets() -> dict:
+    """Every name that can have art: kind -> list of names."""
+    return {
+        "hero": [n for n, _ in G.CHARACTERS],
+        "npc": [n for n, *_ in G.NPCS],
+        "boss": [G.BOSS["name"]],
+        "summon": [v[0] for v in G.SUMMONS.values()],
+        "map": ["Map"],
+    }
+
+
+def _resolve_art_name(query: str):
+    low = query.strip().lower()
+    if low == "map":
+        return "map", "Map"
+    for kind, names in _art_targets().items():
+        for n in names:
+            if n.lower() == low:
+                return kind, n
+    return None, None
+
+
+@router.message(Command("upload"))
+async def cmd_upload(message: Message, command: CommandObject) -> None:
+    if not is_staff(message.from_user.id):
+        return  # silent for non-admins, like the Veil bot
+    query = (command.args or "").strip()
+    src = message.reply_to_message
+    if not query or src is None or not src.photo:
+        await message.answer("Reply to a photo with <code>/upload NAME</code>, e.g. <code>/upload Goku</code> "
+                             "or <code>/upload Map</code>.", parse_mode="HTML")
+        return
+    kind, name = _resolve_art_name(query)
+    if kind is None:
+        await message.answer("I don't know that name. Check /crown for the list.")
+        return
+    db.set_art(kind, name, src.photo[-1].file_id)
+    await message.answer(f"✅ Art saved for <b>{escape(name)}</b>.", parse_mode="HTML")
+
+
+def _crown_text(tab: str, art: dict) -> str:
+    targets = _art_targets()
+    names = targets[tab]
+    have = sum(1 for n in names if (tab, n) in art)
+    lines = [f"👑 <b>Crown · {tab.title()}</b> — {have}/{len(names)} have art"]
+    for n in names:
+        lines.append(f"{'✅' if (tab, n) in art else '❌'} {escape(n)}")
+    lines.append("<i>Upload: reply to a photo with /upload NAME</i>")
+    return "\n".join(lines)
+
+
+def _crown_kb() -> InlineKeyboardMarkup:
+    tabs = [("hero", "Heroes"), ("npc", "NPCs"), ("boss", "Boss"), ("summon", "Summons"), ("map", "Map")]
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=t, callback_data=f"crown:{k}")
+                                                  for k, t in tabs]])
+
+
+@router.message(Command("crown"))
+async def cmd_crown(message: Message) -> None:
+    if not is_staff(message.from_user.id):
+        return
+    await message.answer("👑 <b>Crown</b>: pick a category.", reply_markup=_crown_kb(), parse_mode="HTML")
+
+
+@router.callback_query(F.data.regexp(r"^crown:(hero|npc|boss|summon|map)$"))
+async def cb_crown(callback: CallbackQuery) -> None:
+    if not is_staff(callback.from_user.id):
+        await callback.answer()
+        return
+    tab = callback.data.split(":")[1]
+    try:
+        await callback.message.edit_text(_crown_text(tab, db.all_art()), reply_markup=_crown_kb(),
+                                         parse_mode="HTML")
+    except Exception:
+        pass  # same screen tapped again
+    await callback.answer()
 
 
 # ---------------- run
