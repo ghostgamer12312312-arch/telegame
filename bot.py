@@ -1,0 +1,438 @@
+"""Telegram RPG starter: profile, explore, boss, gacha, shop, skills, dragon balls, summons, raid.
+
+Run locally:  BOT_TOKEN=123:abc python bot.py
+"""
+import asyncio
+import json
+import logging
+import os
+import random
+from html import escape
+
+from aiogram import Bot, Dispatcher, F, Router
+from aiogram.client.default import DefaultBotProperties
+from aiogram.filters import Command, CommandObject
+from aiogram.types import CallbackQuery, Message
+
+import db
+import game_data as G
+
+logging.basicConfig(level=logging.INFO)
+router = Router(name="game")
+OWNER_ID = int(os.getenv("OWNER_ID", "0") or 0)
+ADMIN_IDS = {int(x) for x in os.getenv("ADMIN_IDS", "").replace(" ", "").split(",") if x.isdigit()} | {OWNER_ID}
+
+
+def is_staff(uid: int) -> bool:
+    return uid in ADMIN_IDS
+
+
+# ---------------- stats and battle
+def equipped_char_bonus(uid: int) -> tuple[int, int]:
+    p = db.player(uid)
+    name = p["equipped_char"]
+    if not name:
+        return 0, 0
+    row = next((c for c in db.characters(uid) if c["name"] == name), None)
+    if row is None:
+        return 0, 0
+    return G.RARITY_ATK[row["rarity"]], G.RARITY_HP[row["rarity"]]
+
+
+def player_stats(uid: int) -> tuple[int, int]:
+    """(attack, max_hp) from level, gear, equipped character and learned skills."""
+    p = db.player(uid)
+    lvl = db.level_of(p["exp"])
+    atk = 10 + lvl * 3
+    hp = 100 + lvl * 10
+    ca, ch = equipped_char_bonus(uid)
+    atk += ca
+    hp += ch
+    if p["weapon"] in G.EQUIPMENT:
+        atk += G.EQUIPMENT[p["weapon"]][1]
+    if p["armor"] in G.EQUIPMENT:
+        hp += G.EQUIPMENT[p["armor"]][1] * 2
+    atk += sum(G.SKILL_ATK.get(s, 0) for s in db.skills(uid))
+    return atk, hp
+
+
+def auto_battle(p_hp: int, p_atk: int, e_hp: int, e_dmg: int) -> tuple[bool, int, list[str]]:
+    """Simple turn fight. Returns (won, player_hp_left, log lines)."""
+    log = []
+    for rnd in range(1, 41):
+        hit = max(1, int(p_atk * random.uniform(0.8, 1.2)))
+        e_hp -= hit
+        if e_hp <= 0:
+            log.append(f"Round {rnd}: you hit for {hit}. Victory!")
+            return True, max(1, p_hp), log
+        taken = max(1, int(e_dmg * random.uniform(0.8, 1.2)))
+        p_hp -= taken
+        log.append(f"Round {rnd}: you hit {hit}, take {taken}.")
+        if p_hp <= 0:
+            return False, 0, log
+    return False, max(0, p_hp), log + ["The fight dragged on and you backed off."]
+
+
+# ---------------- basics
+@router.message(Command("start", "help"))
+async def cmd_start(message: Message) -> None:
+    u = message.from_user
+    db.ensure_player(u.id, u.first_name, u.username)
+    await message.answer(
+        "🐉 <b>Welcome to the RPG</b>\n\n"
+        "/profile  your stats\n/explore  fight NPCs (boss every 15 wins)\n"
+        "/myinventory  yens, gems, items, balls\n/shop  buy gear, tickets, keys, crystals\n"
+        "/buy &lt;id&gt; [qty]  buy from /shop\n/gacha  spend a ticket on a DBS character\n"
+        "/mycharacters  your characters\n/myteam  your active team\n/equip &lt;name&gt;  equip gear or a character\n"
+        "/skills  skill shop\n/learn &lt;skill&gt;  learn a skill\n/wish  use all 1 to 7 star dragon balls\n"
+        "/summon elite or /summon mythical  fight a key boss\n/raid  global raid (status)\n"
+        "/raid_start  start raid (owner/admin only)\n/raid_attack  hit the raid boss")
+
+
+@router.message(Command("profile"))
+async def cmd_profile(message: Message) -> None:
+    u = message.from_user
+    db.ensure_player(u.id, u.first_name, u.username)
+    p = db.player(u.id)
+    lvl = db.level_of(p["exp"])
+    caption = (f"👤 <b>{escape(p['first_name'] or 'Unknown')}</b>\n"
+               f"Username: @{escape(p['username'] or '-')}\nUser ID: <code>{u.id}</code>\n"
+               f"EXP: {p['exp']:,} · Level: {lvl} · Rank: #{db.rank_of(u.id)}\n"
+               f"Equipped character: {escape(p['equipped_char'] or 'none')}")
+    photos = await message.bot.get_user_profile_photos(u.id, limit=1)
+    if photos.total_count:
+        await message.answer_photo(photos.photos[0][-1].file_id, caption=caption, parse_mode="HTML")
+    else:
+        await message.answer(caption, parse_mode="HTML")
+
+
+# ---------------- explore and boss
+@router.message(Command("explore"))
+async def cmd_explore(message: Message) -> None:
+    uid = message.from_user.id
+    db.ensure_player(uid, message.from_user.first_name, message.from_user.username)
+    p = db.player(uid)
+    atk, hp = player_stats(uid)
+    if p["npc_streak"] >= G.NPC_STREAK_FOR_BOSS:
+        b = G.BOSS
+        won, left, log = auto_battle(hp, atk, b["hp"], b["dmg"])
+        if not won:
+            db.set_field(uid, "npc_streak", 0)
+            await message.answer(f"💀 <b>{b['name']}</b> beat you. Heal and try again.\n" + "\n".join(log[-3:]),
+                                 parse_mode="HTML")
+            return
+        db.set_field(uid, "npc_streak", 0)
+        db.give(uid, yens=b["yens"], gems=b["gems"], crystals=b["crystals"],
+                tickets=b["tickets"], skill_points=b["skill_points"], exp=200)
+        extra = []
+        for _ in range(random.randint(1, 3)):
+            star = random.choice(list(G.DRAGON_BALL_STARS))
+            db.add_dragon_ball(uid, star)
+            extra.append(f"{star}★ Dragon Ball")
+        if random.random() < 0.5:
+            name = random.choice(list(G.EQUIPMENT))
+            db.add_item(uid, name)
+            extra.append(name)
+        if random.random() < 0.2:
+            learnable = [s for s in G.SKILLS if s not in db.skills(uid)]
+            if learnable:
+                s = random.choice(learnable)
+                db.add_skill(uid, s)
+                extra.append(f"skill {s}")
+        await message.answer(
+            f"🏆 <b>Boss defeated: {b['name']}!</b>\n+{b['yens']:,} yens, +{b['gems']} gems, "
+            f"+{b['crystals']} crystals, +{b['tickets']} gacha tickets, +{b['skill_points']} skill points, +200 EXP\n"
+            + (f"Bonus: {', '.join(extra)}" if extra else ""), parse_mode="HTML")
+        return
+
+    name, npc_hp, npc_dmg, yens = random.choice(G.NPCS)
+    won, left, log = auto_battle(hp, atk, npc_hp, npc_dmg)
+    if not won:
+        await message.answer(f"😵 {name} beat you this time. No rewards.\n" + "\n".join(log[-2:]), parse_mode="HTML")
+        return
+    rewards = {"yens": yens, "exp": 20 + G.NPCS.index((name, npc_hp, npc_dmg, yens)) * 5}
+    notes = [f"+{yens} yens"]
+    if random.random() < 0.30:
+        g = random.randint(1, 3); rewards["gems"] = g; notes.append(f"+{g} gems")
+    if random.random() < 0.10:
+        rewards["crystals"] = 1; notes.append("+1 crystal")
+    if random.random() < 0.25:
+        rewards["skill_points"] = 1; notes.append("+1 skill point")
+    if random.random() < 0.05:
+        rewards["tickets"] = 1; notes.append("+1 gacha ticket")
+    if random.random() < 0.05:
+        star = random.choice(list(G.DRAGON_BALL_STARS)); db.add_dragon_ball(uid, star); notes.append(f"{star}★ Dragon Ball")
+    if random.random() < 0.05:
+        it = random.choice(list(G.EQUIPMENT)); db.add_item(uid, it); notes.append(it)
+    db.give(uid, **rewards)
+    db.set_field(uid, "npc_streak", p["npc_streak"] + 1)
+    left_to_boss = G.NPC_STREAK_FOR_BOSS - (p["npc_streak"] + 1)
+    tail = f"\n⚠ A boss is coming in {left_to_boss} more win(s)!" if left_to_boss > 0 else \
+        "\n⚠ A boss has appeared. Use /explore to face it!"
+    await message.answer(f"⚔ You defeated <b>{name}</b>!\n" + ", ".join(notes) + tail, parse_mode="HTML")
+
+
+# ---------------- inventory and shop
+@router.message(Command("myinventory"))
+async def cmd_inventory(message: Message) -> None:
+    uid = message.from_user.id
+    db.ensure_player(uid, message.from_user.first_name, message.from_user.username)
+    p = db.player(uid)
+    items = db.items(uid)
+    balls = db.dragon_balls(uid)
+    lines = [
+        "🎒 <b>Inventory</b>",
+        f"Yens: {p['yens']:,} · Gems: {p['gems']} · Crystals: {p['crystals']}",
+        f"Gacha tickets: {p['tickets']} · Skill points: {p['skill_points']}",
+        f"Elite keys: {p['keys_elite']} · Boss keys: {p['keys_boss']}",
+        f"Weapon: {escape(p['weapon'] or 'none')} · Armor: {escape(p['armor'] or 'none')}",
+        "", "<b>Items</b>: " + (", ".join(f"{escape(r['item'])} x{r['qty']}" for r in items) or "none"),
+        "<b>Dragon balls</b>: " + (", ".join(f"{s}★ x{q}" for s, q in sorted(balls.items())) or "none"),
+        "<b>Skills</b>: " + (", ".join(db.skills(uid)) or "none"),
+    ]
+    await message.answer("\n".join(lines), parse_mode="HTML")
+
+
+@router.message(Command("shop"))
+async def cmd_shop(message: Message) -> None:
+    lines = ["🛒 <b>Shop</b>  (buy with /buy &lt;id&gt; [qty])"]
+    for sid, (name, price, cur, kind, _) in G.SHOP.items():
+        lines.append(f"{sid}. {escape(name)} — {price:,} {cur}")
+    await message.answer("\n".join(lines), parse_mode="HTML")
+
+
+@router.message(Command("buy"))
+async def cmd_buy(message: Message, command: CommandObject) -> None:
+    uid = message.from_user.id
+    db.ensure_player(uid, message.from_user.first_name, message.from_user.username)
+    parts = (command.args or "").split()
+    if not parts or not parts[0].isdigit() or int(parts[0]) not in G.SHOP:
+        await message.answer("Use <code>/buy &lt;id&gt; [qty]</code>. See /shop.", parse_mode="HTML")
+        return
+    qty = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 1
+    qty = max(1, min(qty, 50))
+    name, price, cur, kind, amount = G.SHOP[int(parts[0])]
+    total = price * qty
+    if not db.spend(uid, cur, total):
+        await message.answer(f"Not enough {cur}. {name} x{qty} costs {total:,} {cur}.")
+        return
+    if kind == "item":
+        db.add_item(uid, name, qty)
+    elif kind == "ticket":
+        db.give(uid, tickets=amount * qty)
+    elif kind == "crystal":
+        db.give(uid, crystals=amount * qty)
+    elif kind == "key_elite":
+        db.give(uid, keys_elite=amount * qty)
+    elif kind == "key_boss":
+        db.give(uid, keys_boss=amount * qty)
+    await message.answer(f"✅ Bought {name} x{qty} for {total:,} {cur}.")
+
+
+@router.message(Command("equip"))
+async def cmd_equip(message: Message, command: CommandObject) -> None:
+    uid = message.from_user.id
+    name = (command.args or "").strip()
+    if not name:
+        await message.answer("Use <code>/equip &lt;name&gt;</code>. Example: /equip Goku or /equip Iron Sword",
+                             parse_mode="HTML")
+        return
+    if name in G.EQUIPMENT:
+        kind = G.EQUIPMENT[name][0]
+        if name not in [r["item"] for r in db.items(uid)]:
+            await message.answer("You don't own that item.")
+            return
+        db.set_field(uid, "weapon" if kind == "weapon" else "armor", name)
+        await message.answer(f"Equipped {name}.")
+        return
+    if not db.has_character(uid, name):
+        await message.answer("You don't own that character. Try /gacha or /mycharacters.")
+        return
+    db.set_field(uid, "equipped_char", name)
+    await message.answer(f"{name} joins your team.")
+
+
+@router.message(Command("myteam"))
+async def cmd_myteam(message: Message) -> None:
+    uid = message.from_user.id
+    p = db.player(uid)
+    atk, hp = player_stats(uid)
+    await message.answer(
+        f"🧩 <b>Your team</b>\nCharacter: {escape(p['equipped_char'] or 'none')}\n"
+        f"Weapon: {escape(p['weapon'] or 'none')}\nArmor: {escape(p['armor'] or 'none')}\n"
+        f"Attack: {atk} · Max HP: {hp}", parse_mode="HTML")
+
+
+@router.message(Command("mycharacters"))
+async def cmd_mycharacters(message: Message) -> None:
+    rows = db.characters(message.from_user.id)
+    if not rows:
+        await message.answer("No characters yet. Try /gacha.")
+        return
+    await message.answer("🐲 <b>Your characters</b>\n" +
+                         "\n".join(f"• {escape(r['name'])} ({r['rarity']})" for r in rows), parse_mode="HTML")
+
+
+# ---------------- gacha, skills, dragon balls
+@router.message(Command("gacha"))
+async def cmd_gacha(message: Message) -> None:
+    uid = message.from_user.id
+    db.ensure_player(uid, message.from_user.first_name, message.from_user.username)
+    if not db.spend(uid, "tickets", 1):
+        await message.answer("You need a gacha ticket. Buy one in /shop (id 7) or win boss fights.")
+        return
+    rarity = db.roll_rarity()
+    pool = [n for n, r in G.CHARACTERS if r == rarity]
+    name = random.choice(pool)
+    if db.add_character(uid, name, rarity):
+        await message.answer(f"🎰 You pulled <b>{escape(name)}</b> ({rarity})!", parse_mode="HTML")
+    else:
+        db.give(uid, gems=2)
+        await message.answer(f"🎰 {escape(name)} ({rarity}) again. Converted to 2 gems.", parse_mode="HTML")
+
+
+@router.message(Command("skills"))
+async def cmd_skills(message: Message) -> None:
+    owned = set(db.skills(message.from_user.id))
+    lines = ["📜 <b>Skill shop</b>  (learn with /learn &lt;name&gt;, paid in skill points)"]
+    for s, cost in G.SKILLS.items():
+        lines.append(f"{'✅' if s in owned else '•'} {escape(s)} — {cost} points, +{G.SKILL_ATK[s]} attack")
+    await message.answer("\n".join(lines), parse_mode="HTML")
+
+
+@router.message(Command("learn"))
+async def cmd_learn(message: Message, command: CommandObject) -> None:
+    uid = message.from_user.id
+    name = (command.args or "").strip()
+    if name not in G.SKILLS:
+        await message.answer("Use <code>/learn &lt;skill&gt;</code>. See /skills.", parse_mode="HTML")
+        return
+    if name in db.skills(uid):
+        await message.answer("You already know that skill.")
+        return
+    if not db.spend(uid, "skill_points", G.SKILLS[name]):
+        await message.answer(f"Not enough skill points. {name} costs {G.SKILLS[name]}.")
+        return
+    db.add_skill(uid, name)
+    await message.answer(f"📘 Learned {name}!")
+
+
+@router.message(Command("wish"))
+async def cmd_wish(message: Message) -> None:
+    uid = message.from_user.id
+    if not db.take_one_of_each_dragon_ball(uid):
+        await message.answer("You need one of each 1★ to 7★ Dragon Ball to make a wish.")
+        return
+    roll = random.random()
+    if roll < 0.10:
+        rarity = "mythical"
+        name = random.choice([n for n, r in G.CHARACTERS if r == rarity])
+        db.add_character(uid, name, rarity)
+        result = f"a mythical character: <b>{escape(name)}</b>"
+    elif roll < 0.25:
+        db.add_item(uid, "Saiyan Blade"); result = "a mythical weapon: <b>Saiyan Blade</b>"
+    elif roll < 0.40:
+        db.add_skill(uid, "Spirit Bomb"); result = "the best skill: <b>Spirit Bomb</b>"
+    elif roll < 0.70:
+        db.give(uid, yens=100000); result = "100,000 yens"
+    elif roll < 0.85:
+        db.give(uid, gems=500); result = "500 gems"
+    else:
+        db.give(uid, crystals=50); result = "50 crystals"
+    await message.answer(f"🐉 Shenron grants your wish: {result}!", parse_mode="HTML")
+
+
+# ---------------- summons
+@router.message(Command("summon"))
+async def cmd_summon(message: Message, command: CommandObject) -> None:
+    uid = message.from_user.id
+    key = (command.args or "").strip().lower()
+    if key not in G.SUMMONS:
+        await message.answer("Use <code>/summon elite</code> or <code>/summon mythical</code>.", parse_mode="HTML")
+        return
+    boss, hp, dmg, mult, column = G.SUMMONS[key]
+    if not db.spend(uid, column, 1):
+        await message.answer(f"You need a {'elite' if key == 'elite' else 'boss'} key. Buy in /shop.")
+        return
+    atk, pl_hp = player_stats(uid)
+    won, left, log = auto_battle(pl_hp, atk, hp, dmg)
+    if not won:
+        await message.answer(f"💀 {boss} was too strong. The key is gone.")
+        return
+    db.give(uid, yens=3000 * mult, gems=50 * mult, crystals=5 * mult, skill_points=4 * mult,
+            tickets=2 * mult, exp=100 * mult)
+    if random.random() < 0.5:
+        db.add_item(uid, random.choice(list(G.EQUIPMENT)))
+    if random.random() < 0.25:
+        learnable = [s for s in G.SKILLS if s not in db.skills(uid)]
+        if learnable:
+            db.add_skill(uid, random.choice(learnable))
+    await message.answer(f"🏆 You beat <b>{boss}</b>! Big rewards: {3000*mult:,} yens, {50*mult} gems, "
+                         f"{5*mult} crystals, {4*mult} skill points, {2*mult} tickets.", parse_mode="HTML")
+
+
+# ---------------- raid
+@router.message(Command("raid"))
+async def cmd_raid(message: Message) -> None:
+    st = db.raid_state()
+    if st is None or not st["active"]:
+        await message.answer("No raid right now. The owner or an admin can start one with /raid_start.")
+        return
+    dmg_by = json.loads(st["damage_json"] or "{}")
+    await message.answer(f"🌋 <b>Global raid</b>\nBoss HP: {st['hp']:,} / {st['max_hp']:,}\n"
+                         f"Hitters: {len(dmg_by)}\nHit it with /raid_attack.", parse_mode="HTML")
+
+
+@router.message(Command("raid_start"))
+async def cmd_raid_start(message: Message) -> None:
+    if not is_staff(message.from_user.id):
+        await message.answer("Only the owner or an admin can start a raid.")
+        return
+    db.raid_start()
+    await message.answer(f"🌋 A global raid has begun! Boss HP {G.RAID['hp']:,}. Hit it with /raid_attack. "
+                         f"Defeat it to earn {G.RAID['reward_mult']}x rewards.")
+
+
+@router.message(Command("raid_attack"))
+async def cmd_raid_attack(message: Message) -> None:
+    uid = message.from_user.id
+    st = db.raid_state()
+    if st is None or not st["active"]:
+        await message.answer("No raid is active.")
+        return
+    wait = db.cooldown_ok(uid, G.RAID["attack_cooldown_s"])
+    if wait:
+        await message.answer(f"Wait {wait // 60}m {wait % 60}s before the next raid hit.")
+        return
+    atk, _ = player_stats(uid)
+    damage = max(1, int(atk * random.uniform(1.5, 2.5)))
+    res = db.raid_hit(uid, damage)
+    db.mark_raid_hit(uid)
+    if res is None:
+        return
+    hp_left, defeated, dmg_by = res
+    if not defeated:
+        await message.answer(f"💥 You hit the raid boss for {damage:,}. Boss HP left: {hp_left:,}.")
+        return
+    mult = G.RAID["reward_mult"]
+    for hitter in dmg_by:
+        db.give(int(hitter), yens=5000 * mult, gems=60 * mult, crystals=6 * mult,
+                tickets=3 * mult, skill_points=6 * mult, exp=200 * mult)
+    await message.answer(f"🏆 The raid boss is defeated! {len(dmg_by)} hitters each earned "
+                         f"{mult}x boss rewards.")
+
+
+# ---------------- run
+async def main() -> None:
+    token = os.getenv("BOT_TOKEN")
+    if not token:
+        raise SystemExit("Set BOT_TOKEN first (see README).")
+    db.init()
+    bot = Bot(token=token, default=DefaultBotProperties(parse_mode="HTML"))
+    dp = Dispatcher()
+    dp.include_router(router)
+    await dp.start_polling(bot)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

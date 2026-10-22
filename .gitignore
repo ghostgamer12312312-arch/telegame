@@ -1,0 +1,4 @@
+.env
+game.sqlite
+__pycache__/
+*.pyc
