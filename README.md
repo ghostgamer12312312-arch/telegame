@@ -149,7 +149,7 @@ pip install -r requirements.txt
 |---|---|
 | "Set BOT_TOKEN first" | Your `.env` file is missing the token. Do Step 5 again. |
 | Bot doesn't answer | Check the token has no spaces. Make sure the program is still running. |
-| `pip install` fails on phone | Run `pkg install -y rust clang`, then `pip install -r requirements.txt` |
+| `pip install` fails with `pydantic-core` or `maturin` / "Rust not found" on phone | Type `pkg install -y rust clang`, then `pip install -r requirements.txt` again. Takes several minutes. |
 | You want to start over | Delete the file `game.sqlite` (this erases all player progress) |
 
 ---
